@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
     conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+    category TEXT DEFAULT 'agent',
     model TEXT NOT NULL,
     tokens_input INT NOT NULL DEFAULT 0,
     tokens_output INT NOT NULL DEFAULT 0,
@@ -226,7 +227,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
 CREATE TABLE IF NOT EXISTS sql_query_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id),
-    connector_id UUID REFERENCES connectors(id),
+    connector_id UUID REFERENCES connectors(id) ON DELETE CASCADE,
     query TEXT NOT NULL,
     row_count INT,
     duration_ms INT,

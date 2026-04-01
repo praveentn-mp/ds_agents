@@ -60,8 +60,18 @@ async def list_resources(db: AsyncSession) -> list[MCPResource]:
 
 
 async def list_tools(db: AsyncSession) -> list[MCPTool]:
-    result = await db.execute(select(MCPTool).where(MCPTool.is_active == True).order_by(MCPTool.created_at.desc()))
-    return list(result.scalars().all())
+    """List MCP tools, deduplicated by name (keeps latest per name)."""
+    result = await db.execute(
+        select(MCPTool).where(MCPTool.is_active == True).order_by(MCPTool.created_at.desc())
+    )
+    all_tools = list(result.scalars().all())
+    seen = set()
+    deduped = []
+    for t in all_tools:
+        if t.name not in seen:
+            seen.add(t.name)
+            deduped.append(t)
+    return deduped
 
 
 async def list_prompts(db: AsyncSession) -> list[MCPPrompt]:

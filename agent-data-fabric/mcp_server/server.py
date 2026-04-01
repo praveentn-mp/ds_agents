@@ -113,6 +113,50 @@ async def create_tool(name: str, description: str, code: str) -> str:
     return f"Tool '{name}' creation request received. Use the backend API to register and test."
 
 
+@mcp.tool()
+async def execute_custom_tool(tool_name: str, arguments: dict) -> str:
+    """Execute a registered custom tool by name.
+
+    Args:
+        tool_name: Name of the custom tool to execute
+        arguments: Arguments to pass to the tool
+    """
+    import httpx
+    try:
+        backend_url = os.environ.get("BACKEND_URL", "http://localhost:7790")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{backend_url}/internal/tools/execute",
+                json={"tool_name": tool_name, "arguments": arguments},
+                timeout=30.0,
+            )
+            return response.text
+    except Exception as e:
+        return f"Custom tool execution failed: {str(e)}"
+
+
+@mcp.tool()
+async def list_custom_tools() -> str:
+    """List all registered custom tools and their descriptions."""
+    import httpx
+    try:
+        backend_url = os.environ.get("BACKEND_URL", "http://localhost:7790")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{backend_url}/internal/tools",
+                timeout=10.0,
+            )
+            if response.status_code == 200:
+                tools = response.json()
+                lines = []
+                for t in tools:
+                    lines.append(f"- {t['name']}: {t.get('description', 'No description')} (active: {t.get('is_active', True)})")
+                return "\n".join(lines) if lines else "No custom tools registered."
+            return f"Failed to list tools: HTTP {response.status_code}"
+    except Exception as e:
+        return f"Failed to list tools: {str(e)}"
+
+
 # ─── Prompts ──────────────────────────────────────────────────────────────────
 
 @mcp.prompt()

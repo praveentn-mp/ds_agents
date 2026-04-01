@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional, Any
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
@@ -16,7 +16,7 @@ class MessageResponse(BaseModel):
     conversation_id: UUID
     role: str
     content: str
-    metadata: Optional[dict] = None
+    metadata: Optional[dict] = Field(default=None, validation_alias="message_metadata")
     created_at: datetime
 
     model_config = {"from_attributes": True}

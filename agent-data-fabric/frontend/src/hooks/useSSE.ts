@@ -3,7 +3,7 @@ import { useChatStore } from '../store/chatStore';
 
 export function useSSE() {
   const abortRef = useRef<AbortController | null>(null);
-  const { addMessage, addTraceEvent, setStreaming, clearTrace, setTokenStats } = useChatStore();
+  const { addMessage, addTraceEvent, setStreaming, clearTrace, setTokenStats, setCurrentConversation } = useChatStore();
 
   const sendMessage = useCallback(
     async (message: string, conversationId?: string) => {
@@ -49,6 +49,10 @@ export function useSSE() {
                 } else if (data.event === 'token') {
                   responseText += data.data.content;
                 } else if (data.event === 'done') {
+                  // Track conversation ID
+                  if (data.data.conversation_id) {
+                    setCurrentConversation(data.data.conversation_id);
+                  }
                   if (responseText) {
                     addMessage({
                       id: crypto.randomUUID(),
@@ -87,7 +91,7 @@ export function useSSE() {
         setStreaming(false);
       }
     },
-    [addMessage, addTraceEvent, clearTrace, setStreaming, setTokenStats]
+    [addMessage, addTraceEvent, clearTrace, setStreaming, setTokenStats, setCurrentConversation]
   );
 
   const cancel = useCallback(() => {

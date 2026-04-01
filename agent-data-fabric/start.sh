@@ -163,6 +163,9 @@ log "🗄️  Initializing database..."
 docker exec -i "$CONTAINER_NAME" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < db/init.sql >> "$LOG_FILE" 2>&1 || {
     log "⚠️  DB init had issues (may be OK if tables already exist)"
 }
+docker exec -i "$CONTAINER_NAME" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < db/vector_schema.sql >> "$LOG_FILE" 2>&1 || {
+    log "⚠️  Vector schema init had issues (may be OK if tables already exist)"
+}
 log "✓ Database initialized"
 
 # ─── 4. Generate secrets if needed ────────────────────────────────────────────

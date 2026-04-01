@@ -4,7 +4,7 @@ import time
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.connector import Connector
@@ -134,6 +134,24 @@ async def delete_connector(db: AsyncSession, connector_id: UUID) -> bool:
     if not connector:
         return False
     connector_registry.unregister(connector.name)
+
+    # Clean up non-FK-linked tables (vector indices, ingestion metadata, etc.)
+    # Note: column_metadata cascades via ingestion_id → ingestion_metadata, not connector_id
+    cid = str(connector_id)
+    for tbl in ("vec_table_index", "vec_column_index", "vec_value_index", "vec_chunk_index"):
+        await db.execute(text(f"DELETE FROM {tbl} WHERE connector_id = :cid"), {"cid": cid})
+    # column_metadata cascades from ingestion_metadata via FK ON DELETE CASCADE
+    await db.execute(text("DELETE FROM ingestion_metadata WHERE connector_id = :cid"), {"cid": cid})
+
+    # Clean up MCP resources linked to this connector
+    await db.execute(
+        select(MCPResource).where(MCPResource.source_id == connector_id)
+    )
+    await db.execute(
+        text("DELETE FROM mcp_resources WHERE source_id = :cid"),
+        {"cid": cid},
+    )
+
     await db.delete(connector)
     await db.flush()
     return True

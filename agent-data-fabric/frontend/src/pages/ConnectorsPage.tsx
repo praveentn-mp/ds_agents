@@ -4,6 +4,7 @@ import type { Connector } from '../types';
 import {
   Database, Plus, Trash2, RefreshCw, CheckCircle2, XCircle, Loader2,
   Settings, Save, X, Download, Table, FileText, ArrowRight, ChevronDown, ChevronRight,
+  Check,
 } from 'lucide-react';
 
 interface KV { [key: string]: string }
@@ -15,12 +16,18 @@ interface IngestionProgress {
   row_count?: number;
   chunks?: number;
   error?: string;
+  counts?: { tables?: number; columns?: number; values?: number; chunks?: number; rows?: number };
 }
 
 interface DataSummary {
-  tables: { name: string; row_count?: number; column_count?: number; source?: string }[];
-  documents: { id: string; source: string; title: string; chunks: number }[];
-  last_synced_at: string | null;
+  connector_id: string;
+  ingestions: { id: string; source_file: string; table_name: string; table_description: string; row_count: number; column_count: number; created_at: string }[];
+  vector_counts: { tables: number; columns: number; values: number; chunks: number };
+  total_rows: number;
+  // Legacy fields
+  tables?: { name: string; row_count?: number; column_count?: number; source?: string }[];
+  documents?: { id: string; source: string; title: string; chunks: number }[];
+  last_synced_at?: string | null;
 }
 
 const CONNECTOR_FIELDS: Record<string, { label: string; key: string; placeholder: string; secret?: boolean }[]> = {
@@ -86,20 +93,77 @@ function ProgressBar({ progress }: { progress: number }) {
   );
 }
 
-function DataSummaryPanel({ summary }: { summary: DataSummary | null }) {
+function DataSummaryPanel({ summary, onReindex, onDeleteData, isReindexing }: {
+  summary: DataSummary | null; onReindex: () => void; onDeleteData: () => void; isReindexing?: boolean;
+}) {
   if (!summary) return null;
-  const hasTables = summary.tables.length > 0;
-  const hasDocs = summary.documents.length > 0;
-  if (!hasTables && !hasDocs) return null;
+  const hasIngestions = summary.ingestions && summary.ingestions.length > 0;
+  const hasVectors = summary.vector_counts && (
+    summary.vector_counts.tables > 0 || summary.vector_counts.columns > 0 ||
+    summary.vector_counts.values > 0 || summary.vector_counts.chunks > 0
+  );
+  // Legacy support
+  const hasTables = summary.tables && summary.tables.length > 0;
+  const hasDocs = summary.documents && summary.documents.length > 0;
+
+  if (!hasIngestions && !hasVectors && !hasTables && !hasDocs) return null;
 
   return (
-    <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
-      {hasTables && (
+    <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+      {/* Vector index counts */}
+      {hasVectors && (
+        <div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
+            <Database className="w-3 h-3" /> Vector Index
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { label: 'Tables', count: summary.vector_counts.tables, color: 'bg-blue-50 text-blue-700' },
+              { label: 'Columns', count: summary.vector_counts.columns, color: 'bg-purple-50 text-purple-700' },
+              { label: 'Values', count: summary.vector_counts.values, color: 'bg-amber-50 text-amber-700' },
+              { label: 'Chunks', count: summary.vector_counts.chunks, color: 'bg-green-50 text-green-700' },
+            ].map((item) => (
+              <div key={item.label} className={`rounded-lg px-2.5 py-1.5 text-center ${item.color}`}>
+                <div className="text-sm font-bold">{item.count.toLocaleString()}</div>
+                <div className="text-[10px] opacity-75">{item.label}</div>
+              </div>
+            ))}
+          </div>
+          {summary.total_rows > 0 && (
+            <p className="text-[10px] text-gray-400 mt-1">{summary.total_rows.toLocaleString()} total rows across all tables</p>
+          )}
+        </div>
+      )}
+
+      {/* Ingestion details */}
+      {hasIngestions && (
+        <div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-1">
+            <Table className="w-3 h-3" /> Ingested Tables
+          </div>
+          {summary.ingestions.map((ing) => (
+            <div key={ing.id} className="flex items-center justify-between text-xs text-gray-600 px-2 py-1">
+              <div className="min-w-0">
+                <span className="font-mono">{ing.table_name}</span>
+                {ing.table_description && (
+                  <span className="ml-1.5 text-gray-400">— {ing.table_description}</span>
+                )}
+              </div>
+              <span className="text-gray-400 whitespace-nowrap ml-2">
+                {ing.row_count?.toLocaleString()} rows · {ing.column_count} cols
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Legacy tables */}
+      {hasTables && !hasIngestions && (
         <div>
           <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-1">
             <Table className="w-3 h-3" /> Tables
           </div>
-          {summary.tables.map((t) => (
+          {summary.tables!.map((t) => (
             <div key={t.name} className="flex items-center justify-between text-xs text-gray-600 px-2 py-0.5">
               <span className="font-mono">{t.name}</span>
               <span className="text-gray-400">
@@ -110,12 +174,14 @@ function DataSummaryPanel({ summary }: { summary: DataSummary | null }) {
           ))}
         </div>
       )}
+
+      {/* Legacy docs */}
       {hasDocs && (
         <div>
           <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-1">
             <FileText className="w-3 h-3" /> RAG Documents
           </div>
-          {summary.documents.map((d) => (
+          {summary.documents!.map((d) => (
             <div key={d.id} className="flex items-center justify-between text-xs text-gray-600 px-2 py-0.5">
               <span className="truncate max-w-[160px]">{d.title}</span>
               <span className="text-gray-400">{d.chunks} chunks</span>
@@ -123,6 +189,27 @@ function DataSummaryPanel({ summary }: { summary: DataSummary | null }) {
           ))}
         </div>
       )}
+
+      {/* Actions: reindex + delete */}
+      {(hasIngestions || hasVectors) && (
+        <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+          <button
+            onClick={onReindex}
+            disabled={isReindexing}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition"
+          >
+            {isReindexing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            Re-index
+          </button>
+          <button
+            onClick={onDeleteData}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition"
+          >
+            <Trash2 className="w-3 h-3" /> Delete All Data
+          </button>
+        </div>
+      )}
+
       {summary.last_synced_at && (
         <p className="text-[10px] text-gray-400">
           Last synced: {new Date(summary.last_synced_at).toLocaleString()}
@@ -159,6 +246,14 @@ export default function ConnectorsPage() {
 
   // Data summary
   const [dataSummaries, setDataSummaries] = useState<Record<string, DataSummary>>({});
+
+  // Table/file selection picker
+  const [tablePickerConnector, setTablePickerConnector] = useState<Connector | null>(null);
+  const [availableTables, setAvailableTables] = useState<{ schema: string; name: string }[]>([]);
+  const [availableFiles, setAvailableFiles] = useState<{ name: string; size?: number; container?: string }[]>([]);
+  const [selectedTables, setSelectedTables] = useState<string[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [loadingTables, setLoadingTables] = useState(false);
 
   const fetchConnectors = async () => {
     setLoading(true);
@@ -206,7 +301,7 @@ export default function ConnectorsPage() {
     try { await connectorApi.delete(id); fetchConnectors(); } catch (err: any) { alert(err.response?.data?.detail || 'Failed'); }
   };
 
-  const handleIngest = async (id: string) => {
+  const handleIngest = async (id: string, opts?: { tableNames?: string[]; fileNames?: string[] }) => {
     setIngesting((p) => ({ ...p, [id]: true }));
     setIngestionLogs((p) => ({ ...p, [id]: [] }));
     setIngestionProgress((p) => ({ ...p, [id]: { step: 'Starting...', progress: 0 } }));
@@ -214,9 +309,17 @@ export default function ConnectorsPage() {
 
     const token = localStorage.getItem('adf_token');
     try {
+      const payload: any = {};
+      if (opts?.tableNames && opts.tableNames.length > 0) payload.table_names = opts.tableNames;
+      if (opts?.fileNames && opts.fileNames.length > 0) payload.file_names = opts.fileNames;
+      const body = Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined;
       const response = await fetch(`/api/connectors/${id}/ingest`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body,
       });
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -255,6 +358,133 @@ export default function ConnectorsPage() {
     connectorApi.dataSummary(id)
       .then((res) => setDataSummaries((p) => ({ ...p, [id]: res.data })))
       .catch(() => {});
+  };
+
+  const openTablePicker = async (c: Connector) => {
+    setTablePickerConnector(c);
+    setLoadingTables(true);
+    setSelectedTables([]);
+    setSelectedFiles([]);
+    setAvailableTables([]);
+    setAvailableFiles([]);
+    try {
+      const res = await connectorApi.discoverSchema(c.id);
+      if (c.connector_type === 'postgres') {
+        const tables = (res.data.schema_json?.tables || []).map((t: any) => ({
+          schema: t.schema,
+          name: t.name,
+        }));
+        setAvailableTables(tables);
+        setSelectedTables(tables.map((t: { schema: string; name: string }) => t.name));
+      } else if (c.connector_type === 'azure_blob') {
+        const files: { name: string; size?: number; container?: string }[] = [];
+        for (const container of (res.data.schema_json?.containers || [])) {
+          for (const blob of (container.blobs || [])) {
+            files.push({ name: blob.name, size: blob.size, container: container.name });
+          }
+        }
+        setAvailableFiles(files);
+        setSelectedFiles(files.map((f) => f.name));
+      } else if (c.connector_type === 'filesystem') {
+        const files: { name: string; size?: number }[] = [];
+        for (const dir of (res.data.schema_json?.directories || [])) {
+          for (const f of (dir.files || [])) {
+            files.push({ name: f.name, size: f.size });
+          }
+        }
+        setAvailableFiles(files);
+        setSelectedFiles(files.map((f) => f.name));
+      }
+    } catch (err) {
+      console.error('Failed to discover schema', err);
+    }
+    setLoadingTables(false);
+  };
+
+  const handleStartIngestWithTables = () => {
+    if (!tablePickerConnector) return;
+    const id = tablePickerConnector.id;
+    const type = tablePickerConnector.connector_type;
+    setTablePickerConnector(null);
+    if (type === 'postgres') {
+      handleIngest(id, { tableNames: selectedTables.length > 0 ? selectedTables : undefined });
+    } else {
+      handleIngest(id, { fileNames: selectedFiles.length > 0 ? selectedFiles : undefined });
+    }
+  };
+
+  const handleReindex = async (id: string) => {
+    if (!confirm('Re-index this connector? This will re-generate all vector embeddings.')) return;
+    setIngesting((p) => ({ ...p, [id]: true }));
+    setIngestionLogs((p) => ({ ...p, [id]: ['Re-indexing...'] }));
+    setIngestionProgress((p) => ({ ...p, [id]: { step: 'Re-indexing...', progress: 0 } }));
+    setExpandedId(id);
+
+    const token = localStorage.getItem('adf_token');
+    try {
+      const response = await fetch(`/api/connectors/${id}/reindex`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) return;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        for (const line of text.split('\n')) {
+          if (line.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.event === 'ingestion_progress' || evt.event === 'reindex_start') {
+                const data = evt.data;
+                setIngestionProgress((p) => ({ ...p, [id]: { step: data.step || data.message, progress: data.progress || 0, counts: data.counts } }));
+                setIngestionLogs((p) => ({
+                  ...p,
+                  [id]: [...(p[id] || []), data.step || data.message],
+                }));
+              } else if (evt.event === 'ingestion_done') {
+                setIngestionProgress((p) => ({ ...p, [id]: { step: 'Re-index complete', progress: 100 } }));
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (e: any) {
+      setIngestionProgress((p) => ({ ...p, [id]: { step: `Error: ${e.message}`, progress: 0, error: e.message } }));
+    }
+
+    setIngesting((p) => ({ ...p, [id]: false }));
+    fetchConnectors();
+    connectorApi.dataSummary(id)
+      .then((res) => setDataSummaries((p) => ({ ...p, [id]: res.data })))
+      .catch(() => {});
+  };
+
+  const handleDeleteData = async (id: string) => {
+    if (!confirm('Delete ALL ingested data and vector indices for this connector? This cannot be undone.')) return;
+    try {
+      await connectorApi.deleteData(id);
+      setDataSummaries((p) => {
+        const copy = { ...p };
+        delete copy[id];
+        return copy;
+      });
+      setIngestionProgress((p) => {
+        const copy = { ...p };
+        delete copy[id];
+        return copy;
+      });
+      setIngestionLogs((p) => {
+        const copy = { ...p };
+        delete copy[id];
+        return copy;
+      });
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to delete data');
+    }
   };
 
   const openSettings = (c: Connector) => {
@@ -311,7 +541,6 @@ export default function ConnectorsPage() {
             const isIngesting = ingesting[c.id];
             const logs = ingestionLogs[c.id] || [];
             const summary = dataSummaries[c.id];
-            const supportsIngest = c.connector_type !== 'postgres';
 
             return (
               <div key={c.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-sm transition">
@@ -332,14 +561,14 @@ export default function ConnectorsPage() {
                     </div>
                     <div className="flex items-center gap-1.5 ml-4">
                       <button onClick={() => handleTest(c.id)} className="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 rounded-lg hover:bg-brand-100 transition">Test</button>
-                      {supportsIngest && c.is_active && (
+                      {c.is_active && (
                         <button
-                          onClick={() => handleIngest(c.id)}
+                          onClick={() => openTablePicker(c)}
                           disabled={isIngesting}
                           className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 disabled:opacity-50 transition"
                         >
                           {isIngesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                          Ingest
+                          {c.connector_type === 'postgres' ? 'Index' : 'Ingest'}
                         </button>
                       )}
                       <button onClick={() => setExpandedId(isExpanded ? null : c.id)}
@@ -356,9 +585,9 @@ export default function ConnectorsPage() {
                     <div className={`flex items-center gap-2 text-xs mt-3 ${testResults[c.id].success ? 'text-green-600' : 'text-red-600'}`}>
                       {testResults[c.id].success ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
                       <span>{testResults[c.id].message}</span>
-                      {testResults[c.id].success && supportsIngest && !isIngesting && (
-                        <button onClick={() => handleIngest(c.id)} className="ml-2 flex items-center gap-1 text-amber-600 hover:text-amber-700 font-medium">
-                          <ArrowRight className="w-3 h-3" /> Ingest data now
+                      {testResults[c.id].success && !isIngesting && (
+                        <button onClick={() => openTablePicker(c)} className="ml-2 flex items-center gap-1 text-amber-600 hover:text-amber-700 font-medium">
+                          <ArrowRight className="w-3 h-3" /> {c.connector_type === 'postgres' ? 'Index data now' : 'Ingest data now'}
                         </button>
                       )}
                     </div>
@@ -369,6 +598,15 @@ export default function ConnectorsPage() {
                     <div className="mt-3 space-y-1.5">
                       <ProgressBar progress={progress.progress} />
                       <p className="text-xs text-gray-500">{progress.step}</p>
+                      {progress.counts && (
+                        <div className="flex gap-3 text-[10px] text-gray-400">
+                          {progress.counts.tables != null && <span>Tables: {progress.counts.tables}</span>}
+                          {progress.counts.columns != null && <span>Columns: {progress.counts.columns}</span>}
+                          {progress.counts.values != null && <span>Values: {progress.counts.values}</span>}
+                          {progress.counts.chunks != null && <span>Chunks: {progress.counts.chunks}</span>}
+                          {progress.counts.rows != null && <span>Rows: {progress.counts.rows.toLocaleString()}</span>}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -392,12 +630,17 @@ export default function ConnectorsPage() {
                     )}
 
                     {/* Data summary */}
-                    <DataSummaryPanel summary={summary || null} />
+                    <DataSummaryPanel
+                      summary={summary || null}
+                      onReindex={() => handleReindex(c.id)}
+                      onDeleteData={() => handleDeleteData(c.id)}
+                      isReindexing={isIngesting}
+                    />
 
                     {!summary && !logs.length && (
                       <p className="mt-3 text-xs text-gray-400 italic">
                         {c.connector_type === 'postgres'
-                          ? 'This connector queries data live. Use Chat or SQL Explorer to analyze.'
+                          ? 'Click "Index" to analyze schema and build vector search indices for intelligent querying.'
                           : 'Click "Ingest" to load data from this source into the platform.'}
                       </p>
                     )}
@@ -472,6 +715,97 @@ export default function ConnectorsPage() {
           </div>
         </div>
       )}
+
+      {/* Table/File Selection Modal */}
+      {tablePickerConnector && (() => {
+        const isPostgres = tablePickerConnector.connector_type === 'postgres';
+        const items = isPostgres ? availableTables : availableFiles;
+        const selected = isPostgres ? selectedTables : selectedFiles;
+        const setSelected = isPostgres ? setSelectedTables : setSelectedFiles;
+        const itemNames = isPostgres
+          ? availableTables.map((t) => t.name)
+          : availableFiles.map((f) => f.name);
+        const label = isPostgres ? 'Tables' : 'Files';
+        const actionLabel = isPostgres ? 'Index' : 'Ingest';
+
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setTablePickerConnector(null)}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Select {label} to {actionLabel}</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">{tablePickerConnector.name} — choose which {label.toLowerCase()} to include</p>
+                </div>
+                <button onClick={() => setTablePickerConnector(null)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X className="w-4 h-4" /></button>
+              </div>
+
+              {loadingTables ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
+                  <span className="ml-2 text-sm text-gray-500">Discovering {label.toLowerCase()}...</span>
+                </div>
+              ) : items.length === 0 ? (
+                <p className="text-sm text-gray-500 py-8 text-center">No {label.toLowerCase()} found. Make sure the connector is properly configured and tested.</p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
+                    <span className="text-xs text-gray-500">{selected.length} of {items.length} {label.toLowerCase()} selected</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setSelected(itemNames)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Select All</button>
+                      <button onClick={() => setSelected([])} className="text-xs text-gray-500 hover:text-gray-700 font-medium">Clear</button>
+                    </div>
+                  </div>
+                  <div className="space-y-1 max-h-80 overflow-y-auto">
+                    {isPostgres ? availableTables.map((t) => {
+                      const isSelected = selectedTables.includes(t.name);
+                      return (
+                        <label key={`${t.schema}.${t.name}`} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition ${isSelected ? 'bg-brand-50' : 'hover:bg-gray-50'}`}>
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? 'bg-brand-600 border-brand-600' : 'border-gray-300'}`}>
+                            {isSelected && <Check className="w-3 h-3 text-white" />}
+                          </div>
+                          <input type="checkbox" checked={isSelected} onChange={() => setSelectedTables((prev) => isSelected ? prev.filter((n) => n !== t.name) : [...prev, t.name])} className="sr-only" />
+                          <span className="text-sm font-mono text-gray-700">{t.schema}.{t.name}</span>
+                        </label>
+                      );
+                    }) : availableFiles.map((f) => {
+                      const isSelected = selectedFiles.includes(f.name);
+                      const ext = f.name.includes('.') ? f.name.split('.').pop()?.toLowerCase() : '';
+                      const sizeStr = f.size != null ? (f.size > 1024 * 1024 ? `${(f.size / 1024 / 1024).toFixed(1)} MB` : `${(f.size / 1024).toFixed(1)} KB`) : '';
+                      return (
+                        <label key={f.name} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition ${isSelected ? 'bg-brand-50' : 'hover:bg-gray-50'}`}>
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? 'bg-brand-600 border-brand-600' : 'border-gray-300'}`}>
+                            {isSelected && <Check className="w-3 h-3 text-white" />}
+                          </div>
+                          <input type="checkbox" checked={isSelected} onChange={() => setSelectedFiles((prev) => isSelected ? prev.filter((n) => n !== f.name) : [...prev, f.name])} className="sr-only" />
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-sm text-gray-700 truncate">{f.name}</span>
+                            {f.container && <span className="text-[10px] text-gray-400">({f.container})</span>}
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-gray-400 whitespace-nowrap">
+                            {ext && <span className="uppercase">{ext}</span>}
+                            {sizeStr && <span>{sizeStr}</span>}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <div className="flex gap-3 justify-end mt-5 pt-4 border-t border-gray-100">
+                <button onClick={() => setTablePickerConnector(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancel</button>
+                <button
+                  onClick={handleStartIngestWithTables}
+                  disabled={selected.length === 0 || loadingTables}
+                  className="flex items-center gap-2 px-4 py-2 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition"
+                >
+                  <Download className="w-3.5 h-3.5" /> {actionLabel} {selected.length} {selected.length === 1 ? label.slice(0, -1) : label}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

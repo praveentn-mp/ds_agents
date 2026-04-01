@@ -116,6 +116,7 @@ export interface ObservabilitySummary {
 export interface LLMCall {
   id: string;
   message_id: string | null;
+  category: string | null;
   model: string;
   tokens_input: number;
   tokens_output: number;

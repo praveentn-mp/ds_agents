@@ -12,6 +12,7 @@ import SQLPage from './pages/SQLPage';
 import CapabilitiesPage from './pages/CapabilitiesPage';
 import ObservabilityPage from './pages/ObservabilityPage';
 import SettingsPage from './pages/SettingsPage';
+import SearchPage from './pages/SearchPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/mcp" element={<MCPPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/sql" element={<SQLPage />} />
+            <Route path="/search" element={<SearchPage />} />
             <Route path="/capabilities" element={<CapabilitiesPage />} />
             <Route path="/observability" element={<ObservabilityPage />} />
             <Route path="/settings" element={<SettingsPage />} />

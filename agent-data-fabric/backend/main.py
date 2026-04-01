@@ -21,6 +21,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.app_name}...")
     logger.info(f"LLM backend: {'Azure OpenAI' if settings.use_azure_openai else 'Ollama'}")
     logger.info(f"Database: {settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}")
+    # Preload embedding model so first search/query isn't slow
+    try:
+        from backend.services.embedding_service import get_model
+        await get_model()
+        logger.info("Embedding model loaded")
+    except Exception as e:
+        logger.warning(f"Embedding model preload failed (will lazy-load): {e}")
     yield
     logger.info(f"Shutting down {settings.app_name}...")
 
@@ -57,6 +64,8 @@ from backend.api.rag import router as rag_router
 from backend.api.observability import router as observability_router
 from backend.api.capabilities import router as capabilities_router
 from backend.api.ingestion import router as ingestion_router
+from backend.api.ingestion import search_router
+from backend.api.internal import router as internal_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -70,3 +79,5 @@ app.include_router(chat_router)
 app.include_router(rag_router)
 app.include_router(observability_router)
 app.include_router(capabilities_router)
+app.include_router(search_router)
+app.include_router(internal_router)

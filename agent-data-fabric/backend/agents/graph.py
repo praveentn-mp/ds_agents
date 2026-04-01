@@ -11,7 +11,7 @@ from backend.agents.state import ADFAgentState
 from backend.agents.nodes.orchestrator import classify_intent, resolve_capabilities, route_decision
 from backend.agents.nodes.query_agent import query_agent
 from backend.agents.nodes.tool_agent import tool_agent
-from backend.agents.nodes.rag_agent import rag_agent
+from backend.agents.nodes.meta_agent import meta_agent
 from backend.models.message import Message
 from backend.models.execution_trace import ExecutionTrace
 from backend.models.llm_call import LLMCall
@@ -25,7 +25,7 @@ def build_graph() -> StateGraph:
     graph.add_node("resolve_capabilities", resolve_capabilities)
     graph.add_node("query_agent", query_agent)
     graph.add_node("tool_agent", tool_agent)
-    graph.add_node("rag_agent", rag_agent)
+    graph.add_node("meta_agent", meta_agent)
     graph.add_node("response_formatter", response_formatter)
     graph.add_node("error_handler", error_handler)
 
@@ -40,14 +40,13 @@ def build_graph() -> StateGraph:
         {
             "query": "query_agent",
             "tool": "tool_agent",
-            "rag": "rag_agent",
-            "hybrid": "query_agent",
+            "meta": "meta_agent",
             "error": "error_handler",
         },
     )
     graph.add_edge("query_agent", "response_formatter")
     graph.add_edge("tool_agent", "response_formatter")
-    graph.add_edge("rag_agent", "response_formatter")
+    graph.add_edge("meta_agent", "response_formatter")
     graph.add_edge("response_formatter", END)
     graph.add_edge("error_handler", END)
 
@@ -161,6 +160,7 @@ async def run_agent(
                 llm_record = LLMCall(
                     message_id=assistant_msg.id,
                     conversation_id=conversation_id,
+                    category="agent",
                     model=call_data.get("model", "unknown"),
                     tokens_input=call_data.get("tokens_input", 0),
                     tokens_output=call_data.get("tokens_output", 0),

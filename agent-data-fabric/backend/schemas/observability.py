@@ -19,6 +19,7 @@ class ObservabilitySummary(BaseModel):
 class LLMCallEntry(BaseModel):
     id: UUID
     message_id: Optional[UUID] = None
+    category: Optional[str] = None
     model: str
     tokens_input: int
     tokens_output: int

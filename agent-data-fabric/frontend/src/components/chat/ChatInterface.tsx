@@ -1,21 +1,77 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChatStore } from '../../store/chatStore';
 import { useSSE } from '../../hooks/useSSE';
-import { Send, StopCircle, Bot, User, Loader2, Zap, Clock, Cpu, ChevronDown, ChevronRight, MessageSquare, BookOpen } from 'lucide-react';
+import { chatApi } from '../../api/client';
+import { Send, StopCircle, Bot, User, Loader2, Zap, Clock, Cpu, ChevronDown, ChevronRight, MessageSquare, BookOpen, Plus, History, X, Trash2 } from 'lucide-react';
 import TracePanel from './TracePanel';
 import MarkdownRenderer from './MarkdownRenderer';
 
 export default function ChatInterface() {
   const [input, setInput] = useState('');
   const [showTrace, setShowTrace] = useState(true);
+  const [showHistory, setShowHistory] = useState(true);
   const [statsOpen, setStatsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { messages, isStreaming, currentConversation, tokenStats } = useChatStore();
+  const {
+    conversations,
+    messages,
+    isStreaming,
+    currentConversation,
+    tokenStats,
+    setConversations,
+    setCurrentConversation,
+    setMessages,
+  } = useChatStore();
   const { sendMessage, cancel } = useSSE();
+
+  // Load conversation list on mount
+  useEffect(() => {
+    loadConversations();
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const loadConversations = async () => {
+    try {
+      const res = await chatApi.conversations();
+      setConversations(res.data);
+    } catch {
+      // silent — conversations will be loaded when available
+    }
+  };
+
+  const loadConversation = async (convId: string) => {
+    if (convId === currentConversation) return;
+    try {
+      const res = await chatApi.messages(convId);
+      setCurrentConversation(convId);
+      setMessages(res.data);
+      useChatStore.getState().clearTrace();
+      useChatStore.getState().setTokenStats(null);
+    } catch {
+      // silent
+    }
+  };
+
+  const startNewChat = () => {
+    setCurrentConversation(null);
+    setMessages([]);
+    useChatStore.getState().clearTrace();
+    useChatStore.getState().setTokenStats(null);
+  };
+
+  const deleteChat = async (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await chatApi.deleteConversation(convId);
+      if (currentConversation === convId) startNewChat();
+      loadConversations();
+    } catch {
+      // silent
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,24 +88,101 @@ export default function ChatInterface() {
     useChatStore.getState().addMessage(userMsg);
     sendMessage(input, currentConversation || undefined);
     setInput('');
+    // Refresh conversation list after a short delay
+    setTimeout(loadConversations, 2000);
   };
 
   return (
     <div className="flex h-full">
+      {/* Conversation history sidebar */}
+      {showHistory && (
+        <div className="w-64 border-r border-gray-200 bg-gray-50 flex flex-col">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+            <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+              <History className="w-4 h-4" /> History
+            </span>
+            <button
+              onClick={() => setShowHistory(false)}
+              className="p-1 hover:bg-gray-200 rounded transition"
+            >
+              <X className="w-3.5 h-3.5 text-gray-400" />
+            </button>
+          </div>
+          <div className="p-3">
+            <button
+              onClick={startNewChat}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition"
+            >
+              <Plus className="w-4 h-4" /> New Chat
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                className={`group flex items-center gap-1 rounded-lg transition ${
+                  currentConversation === conv.id
+                    ? 'bg-brand-100 text-brand-800'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <button
+                  onClick={() => loadConversation(conv.id)}
+                  className={`flex-1 text-left px-3 py-2 text-sm truncate ${
+                    currentConversation === conv.id ? 'font-medium' : ''
+                  }`}
+                  title={conv.title || 'Untitled'}
+                >
+                  {conv.title || 'Untitled chat'}
+                </button>
+                <button
+                  onClick={(e) => deleteChat(conv.id, e)}
+                  className="p-1 mr-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 rounded transition"
+                  title="Delete conversation"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            {conversations.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-4">No conversations yet</p>
+            )}
+          </div>
+        </div>
+      )}
       {/* Chat area */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Chat</h2>
-            <p className="text-sm text-gray-500">Ask anything about your data</p>
+          <div className="flex items-center gap-3">
+            {!showHistory && (
+              <button
+                onClick={() => setShowHistory(true)}
+                className="p-1.5 hover:bg-gray-100 rounded-lg transition"
+                title="Show conversation history"
+              >
+                <History className="w-4 h-4 text-gray-500" />
+              </button>
+            )}
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Chat</h2>
+              <p className="text-sm text-gray-500">Ask anything about your data</p>
+            </div>
           </div>
-          <button
-            onClick={() => setShowTrace(!showTrace)}
-            className="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 rounded-md hover:bg-brand-100 transition"
-          >
-            {showTrace ? 'Hide' : 'Show'} Trace
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={startNewChat}
+              className="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 rounded-md hover:bg-brand-100 transition flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" /> New Chat
+            </button>
+            <button
+              onClick={() => setShowTrace(!showTrace)}
+              className="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 rounded-md hover:bg-brand-100 transition"
+            >
+              {showTrace ? 'Hide' : 'Show'} Trace
+            </button>
+          </div>
         </div>
 
         {/* Messages */}

@@ -11,6 +11,7 @@ class LLMCall(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"))
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"))
+    category = Column(Text, nullable=True, default="agent")
     model = Column(Text, nullable=False)
     tokens_input = Column(Integer, nullable=False, default=0)
     tokens_output = Column(Integer, nullable=False, default=0)

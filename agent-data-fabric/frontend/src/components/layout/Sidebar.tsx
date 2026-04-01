@@ -12,12 +12,14 @@ import {
   Eye,
   LogOut,
   Layers,
+  Radar,
 } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: 'Chat', icon: MessageSquare },
   { path: '/connectors', label: 'Data Sources', icon: Database },
   { path: '/sql', label: 'SQL Explorer', icon: Search },
+  { path: '/search', label: 'Search', icon: Radar },
   { path: '/tools', label: 'Tools', icon: Wrench },
   { path: '/mcp', label: 'MCP Inspector', icon: Server },
   { path: '/capabilities', label: 'Capabilities', icon: Layers },

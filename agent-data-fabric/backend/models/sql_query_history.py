@@ -10,7 +10,7 @@ class SQLQueryHistory(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id"))
+    connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"))
     query = Column(Text, nullable=False)
     row_count = Column(Integer)
     duration_ms = Column(Integer)

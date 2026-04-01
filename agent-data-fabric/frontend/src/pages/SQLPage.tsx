@@ -1,12 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { sqlApi, connectorApi } from '../api/client';
 import type { Connector, SQLResult } from '../types';
-import { Play, Clock, Loader2, Table, ChevronRight, ChevronDown, Database, Columns, Sparkles } from 'lucide-react';
+import { Play, Clock, Loader2, Table, ChevronRight, ChevronDown, Database, Columns, Sparkles, Layers } from 'lucide-react';
 
 interface TableInfo {
   schema: string;
   name: string;
   columns: { name: string; type: string; nullable: boolean; default: string | null }[];
+}
+
+interface VectorTableInfo {
+  name: string;
+  columns: { name: string; type: string }[];
+  row_count: number;
 }
 
 interface SchemaData {
@@ -42,6 +48,27 @@ const SAMPLE_QUERIES: Record<string, { label: string; query: string }[]> = {
   ],
 };
 
+const VECTOR_SAMPLE_QUERIES: Record<string, { label: string; query: string }[]> = {
+  vec_table_index: [
+    { label: 'All indexed tables', query: 'SELECT table_name, description, metadata, created_at\nFROM vec_table_index\nORDER BY created_at DESC' },
+    { label: 'Table count by connector', query: 'SELECT connector_id, COUNT(*) as table_count\nFROM vec_table_index\nGROUP BY connector_id' },
+  ],
+  vec_column_index: [
+    { label: 'All indexed columns', query: 'SELECT table_name, column_name, description, data_type\nFROM vec_column_index\nORDER BY table_name, column_name' },
+    { label: 'Columns per table', query: 'SELECT table_name, COUNT(*) as column_count\nFROM vec_column_index\nGROUP BY table_name\nORDER BY column_count DESC' },
+    { label: 'Indexable data types', query: 'SELECT data_type, COUNT(*) as col_count\nFROM vec_column_index\nGROUP BY data_type\nORDER BY col_count DESC' },
+  ],
+  vec_value_index: [
+    { label: 'All indexed values', query: 'SELECT table_name, column_name, value_text\nFROM vec_value_index\nORDER BY table_name, column_name\nLIMIT 50' },
+    { label: 'Values per column', query: 'SELECT table_name, column_name, COUNT(*) as value_count\nFROM vec_value_index\nGROUP BY table_name, column_name\nORDER BY value_count DESC' },
+    { label: 'Search for a value', query: 'SELECT table_name, column_name, value_text\nFROM vec_value_index\nWHERE value_text ILIKE \'%search_term%\'\nLIMIT 20' },
+  ],
+  vec_chunk_index: [
+    { label: 'All document chunks', query: 'SELECT source_file, chunk_index, LEFT(chunk_text, 100) as preview\nFROM vec_chunk_index\nORDER BY source_file, chunk_index\nLIMIT 50' },
+    { label: 'Chunks per source file', query: 'SELECT source_file, COUNT(*) as chunk_count\nFROM vec_chunk_index\nGROUP BY source_file\nORDER BY chunk_count DESC' },
+  ],
+};
+
 export default function SQLPage() {
   const [query, setQuery] = useState('SELECT name, industry, annual_revenue\nFROM b2b_companies\nORDER BY annual_revenue DESC\nLIMIT 10');
   const [connectors, setConnectors] = useState<Connector[]>([]);
@@ -54,6 +81,10 @@ export default function SQLPage() {
   const [schema, setSchema] = useState<SchemaData | null>(null);
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
+
+  // Vector schema state
+  const [vectorTables, setVectorTables] = useState<VectorTableInfo[]>([]);
+  const [expandedVectorTables, setExpandedVectorTables] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     connectorApi.list().then((res) => {
@@ -73,6 +104,13 @@ export default function SQLPage() {
       .catch(() => setSchema(null))
       .finally(() => setLoadingSchema(false));
   }, [selectedConnector]);
+
+  // Load vector schema once
+  useEffect(() => {
+    sqlApi.vectorSchema()
+      .then((res) => setVectorTables(res.data.tables || []))
+      .catch(() => setVectorTables([]));
+  }, []);
 
   const handleExecute = useCallback(async () => {
     if (!selectedConnector || !query.trim()) return;
@@ -129,83 +167,182 @@ export default function SQLPage() {
           </select>
         </div>
 
+        {/* Single scrollable area for all table groups and sample queries */}
         <div className="flex-1 overflow-y-auto">
           {loadingSchema && (
             <div className="flex items-center gap-2 px-4 py-6 text-xs text-gray-400">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />Loading schema...
             </div>
           )}
+
+          {/* ── Data Tables ── */}
           {schema && schema.tables.length > 0 && (
-            <div className="py-1">
-              {schema.tables.map((table) => {
-                const fullName = table.schema === 'public' ? table.name : `${table.schema}.${table.name}`;
-                const isExpanded = expandedTables.has(fullName);
-                return (
-                  <div key={fullName}>
-                    <button
-                      className="w-full flex items-center gap-1 px-3 py-1.5 text-xs hover:bg-gray-100 transition group"
-                      onClick={() => toggleTable(fullName)}
-                    >
-                      {isExpanded ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
-                      <Table className="w-3 h-3 text-brand-500" />
-                      <span className="font-medium text-gray-700 truncate">{table.name}</span>
-                      <span className="ml-auto text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition"
-                            onClick={(e) => { e.stopPropagation(); selectTable(fullName === table.name ? table.name : fullName); }}
-                      >SELECT</span>
-                    </button>
-                    {isExpanded && (
-                      <div className="ml-7 border-l border-gray-200">
-                        {table.columns.map((col) => (
-                          <div key={col.name} className="flex items-center gap-1.5 px-2 py-0.5 text-[11px] text-gray-500">
-                            <Columns className="w-2.5 h-2.5 text-gray-300" />
-                            <span className="text-gray-600">{col.name}</span>
-                            <span className="text-gray-400 ml-auto">{col.type}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div>
+              <div className="px-4 py-2 bg-white border-b border-gray-100 sticky top-0 z-10">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+                  <Table className="w-3.5 h-3.5 text-brand-500" />
+                  Data Tables
+                  <span className="ml-auto text-[10px] font-normal text-gray-400">{schema.tables.length}</span>
+                </div>
+              </div>
+              <div className="py-1">
+                {schema.tables.map((table) => {
+                  const fullName = table.schema === 'public' ? table.name : `${table.schema}.${table.name}`;
+                  const isExpanded = expandedTables.has(fullName);
+                  return (
+                    <div key={fullName}>
+                      <button
+                        className="w-full flex items-center gap-1 px-3 py-1.5 text-xs hover:bg-gray-100 transition group"
+                        onClick={() => toggleTable(fullName)}
+                      >
+                        {isExpanded ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
+                        <Table className="w-3 h-3 text-brand-500" />
+                        <span className="font-medium text-gray-700 truncate">{table.name}</span>
+                        <span className="ml-auto text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); selectTable(fullName === table.name ? table.name : fullName); }}
+                        >SELECT</span>
+                      </button>
+                      {isExpanded && (
+                        <div className="ml-7 border-l border-gray-200">
+                          {table.columns.map((col) => (
+                            <div key={col.name} className="flex items-center gap-1.5 px-2 py-0.5 text-[11px] text-gray-500">
+                              <Columns className="w-2.5 h-2.5 text-gray-300" />
+                              <span className="text-gray-600">{col.name}</span>
+                              <span className="text-gray-400 ml-auto">{col.type}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           {schema && schema.tables.length === 0 && (
             <p className="px-4 py-6 text-xs text-gray-400">No tables found</p>
           )}
-        </div>
 
-        {/* Sample queries */}
-        {b2bTables.length > 0 && (
-          <div className="border-t border-gray-200 max-h-[40%] overflow-y-auto">
-            <div className="px-4 py-2 bg-white border-b border-gray-100">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                Sample Queries
+          {/* ── Vector Index Tables ── */}
+          {vectorTables.length > 0 && (
+            <div className="border-t border-gray-200">
+              <div className="px-4 py-2 bg-white border-b border-gray-100 sticky top-0 z-10">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+                  <Layers className="w-3.5 h-3.5 text-purple-500" />
+                  Vector Index Tables
+                  <span className="ml-auto text-[10px] font-normal text-gray-400">{vectorTables.length}</span>
+                </div>
+              </div>
+              <div className="py-1">
+                {vectorTables.map((vt) => {
+                  const isExpanded = expandedVectorTables.has(vt.name);
+                  return (
+                    <div key={vt.name}>
+                      <button
+                        className="w-full flex items-center gap-1 px-3 py-1.5 text-xs hover:bg-gray-100 transition group"
+                        onClick={() => {
+                          setExpandedVectorTables((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(vt.name)) next.delete(vt.name);
+                            else next.add(vt.name);
+                            return next;
+                          });
+                        }}
+                      >
+                        {isExpanded ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
+                        <Table className="w-3 h-3 text-purple-500" />
+                        <span className="font-medium text-gray-700 truncate">{vt.name}</span>
+                        <span className="ml-auto flex items-center gap-1">
+                          <span className="text-[10px] text-gray-400">{vt.row_count.toLocaleString()}</span>
+                          <span className="text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                                onClick={(e) => { e.stopPropagation(); setQuery(`SELECT *\nFROM ${vt.name}\nLIMIT 20`); }}
+                          >SELECT</span>
+                        </span>
+                      </button>
+                      {isExpanded && (
+                        <div className="ml-7 border-l border-gray-200">
+                          {vt.columns.map((col) => (
+                            <div key={col.name} className="flex items-center gap-1.5 px-2 py-0.5 text-[11px] text-gray-500">
+                              <Columns className="w-2.5 h-2.5 text-gray-300" />
+                              <span className="text-gray-600">{col.name}</span>
+                              <span className="text-gray-400 ml-auto">{col.type}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
-            <div className="py-1">
-              {b2bTables.map((table) => {
-                const samples = SAMPLE_QUERIES[table.name];
-                if (!samples) return null;
-                return (
-                  <div key={table.name}>
-                    <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{table.name}</div>
-                    {samples.map((s, i) => (
-                      <button
-                        key={i}
-                        className="w-full text-left px-4 py-1 text-xs text-brand-600 hover:bg-brand-50 hover:text-brand-700 transition truncate"
-                        onClick={() => applySampleQuery(s.query)}
-                        title={s.query}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })}
+          )}
+
+          {/* ── Sample Queries ── */}
+          {b2bTables.length > 0 && (
+            <div className="border-t border-gray-200">
+              <div className="px-4 py-2 bg-white border-b border-gray-100 sticky top-0 z-10">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  Sample Queries
+                </div>
+              </div>
+              <div className="py-1">
+                {b2bTables.map((table) => {
+                  const samples = SAMPLE_QUERIES[table.name];
+                  if (!samples) return null;
+                  return (
+                    <div key={table.name}>
+                      <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{table.name}</div>
+                      {samples.map((s, i) => (
+                        <button
+                          key={i}
+                          className="w-full text-left px-4 py-1 text-xs text-brand-600 hover:bg-brand-50 hover:text-brand-700 transition truncate"
+                          onClick={() => applySampleQuery(s.query)}
+                          title={s.query}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* ── Vector Index Queries ── */}
+          {vectorTables.length > 0 && (
+            <div className="border-t border-gray-200">
+              <div className="px-4 py-2 bg-white border-b border-gray-100 sticky top-0 z-10">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                  Vector Index Queries
+                </div>
+              </div>
+              <div className="py-1">
+                {vectorTables.map((vt) => {
+                  const samples = VECTOR_SAMPLE_QUERIES[vt.name];
+                  if (!samples) return null;
+                  return (
+                    <div key={vt.name}>
+                      <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{vt.name}</div>
+                      {samples.map((s, i) => (
+                        <button
+                          key={i}
+                          className="w-full text-left px-4 py-1 text-xs text-purple-600 hover:bg-purple-50 hover:text-purple-700 transition truncate"
+                          onClick={() => applySampleQuery(s.query)}
+                          title={s.query}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Main area: Query editor + results ── */}

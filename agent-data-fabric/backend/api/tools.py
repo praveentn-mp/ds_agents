@@ -1,7 +1,9 @@
-"""Custom Tools API — CRUD, execute, versions."""
+"""Custom Tools API — CRUD, execute, generate, versions."""
 
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
@@ -11,10 +13,16 @@ from backend.schemas.tool import (
 )
 from backend.services.tool_service import (
     list_tools, get_tool, create_tool, update_tool, execute_tool, get_tool_versions,
+    generate_tool,
 )
 from backend.middleware.auth_middleware import get_current_user
 
 router = APIRouter(prefix="/tools", tags=["tools"])
+
+
+class GenerateToolRequest(BaseModel):
+    description: str
+    connector_id: Optional[str] = None
 
 
 @router.get("", response_model=list[ToolResponse])
@@ -26,6 +34,13 @@ async def list_all(db: AsyncSession = Depends(get_db), user=Depends(get_current_
 async def create(data: ToolCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     tool = await create_tool(db, data.model_dump(), owner_id=user.id)
     return tool
+
+
+@router.post("/generate")
+async def generate(data: GenerateToolRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """Agent-assisted tool generation: user describes what they want, agent identifies tables, generates SQL and tool code."""
+    result = await generate_tool(db, data.description, data.connector_id)
+    return result
 
 
 @router.get("/{tool_id}", response_model=ToolResponse)

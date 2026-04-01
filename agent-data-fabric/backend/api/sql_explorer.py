@@ -15,6 +15,15 @@ from backend.middleware.auth_middleware import get_current_user, require_permiss
 
 router = APIRouter(prefix="/sql", tags=["sql-explorer"])
 
+# Internal ADF tables that should be hidden from user-facing schema browser
+_INTERNAL_TABLES = {
+    "users", "roles", "connectors", "connector_schemas", "conversations", "messages",
+    "llm_calls", "sync_jobs", "custom_tools", "tool_versions", "mcp_servers",
+    "execution_traces", "sql_query_history", "alembic_version",
+    "vec_table_index", "vec_column_index", "vec_value_index", "vec_chunk_index",
+    "ingestion_metadata", "column_metadata",
+}
+
 
 @router.get("/schema/{connector_id}")
 async def get_schema(
@@ -22,7 +31,7 @@ async def get_schema(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Return table/column schema for a postgres connector."""
+    """Return table/column schema for a postgres connector (internal tables filtered out)."""
     result = await db.execute(select(Connector).where(Connector.id == connector_id))
     connector = result.scalar_one_or_none()
     if not connector:
@@ -34,6 +43,12 @@ async def get_schema(
         instance = _build_connector(connector)
         schema = await instance.discover_schema()
         await instance.close()
+        # Filter out internal ADF tables
+        if "tables" in schema:
+            schema["tables"] = [
+                t for t in schema["tables"]
+                if t.get("name") not in _INTERNAL_TABLES
+            ]
         return schema
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -117,3 +132,30 @@ async def history(
         .limit(100)
     )
     return list(result.scalars().all())
+
+
+VECTOR_TABLES = ["vec_table_index", "vec_column_index", "vec_value_index", "vec_chunk_index"]
+
+
+@router.get("/vector-schema")
+async def vector_schema(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return schema and row counts for internal vector index tables."""
+    tables = []
+    for table_name in VECTOR_TABLES:
+        try:
+            cols_result = await db.execute(text(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = :tn AND table_schema = 'public' ORDER BY ordinal_position"
+            ), {"tn": table_name})
+            columns = [{"name": r[0], "type": r[1]} for r in cols_result.fetchall()]
+            if not columns:
+                continue
+            count_result = await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+            row_count = count_result.scalar() or 0
+            tables.append({"name": table_name, "columns": columns, "row_count": row_count})
+        except Exception:
+            continue
+    return {"tables": tables}

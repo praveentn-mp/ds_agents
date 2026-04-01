@@ -54,6 +54,8 @@ export const connectorApi = {
   discoverSchema: (id: string) => api.post(`/connectors/${id}/discover-schema`),
   ingestStatus: (id: string) => api.get(`/connectors/${id}/ingest/status`),
   dataSummary: (id: string) => api.get(`/connectors/${id}/data-summary`),
+  reindex: (id: string) => api.post(`/connectors/${id}/reindex`),
+  deleteData: (id: string) => api.delete(`/connectors/${id}/data`),
 };
 
 // ─── MCP ─────────────────────────────────────────────────────────────────────
@@ -80,12 +82,15 @@ export const toolApi = {
   execute: (id: string, args: Record<string, any>) =>
     api.post(`/tools/${id}/execute`, { arguments: args }),
   versions: (id: string) => api.get(`/tools/${id}/versions`),
+  generate: (description: string, connector_id?: string) =>
+    api.post('/tools/generate', { description, connector_id }),
 };
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
 export const chatApi = {
   conversations: () => api.get('/chat/conversations'),
   messages: (id: string) => api.get(`/chat/conversations/${id}/messages`),
+  deleteConversation: (id: string) => api.delete(`/chat/conversations/${id}`),
 };
 
 // ─── SQL ─────────────────────────────────────────────────────────────────────
@@ -94,14 +99,22 @@ export const sqlApi = {
     api.post('/sql/execute', data),
   history: () => api.get('/sql/history'),
   schema: (connectorId: string) => api.get(`/sql/schema/${connectorId}`),
+  vectorSchema: () => api.get('/sql/vector-schema'),
 };
 
 // ─── Observability ───────────────────────────────────────────────────────────
 export const observabilityApi = {
-  summary: () => api.get('/observability/summary'),
-  llmCalls: (page = 1, page_size = 50) =>
-    api.get('/observability/llm-calls', { params: { page, page_size } }),
+  summary: (category?: string) =>
+    api.get('/observability/summary', { params: category ? { category } : undefined }),
+  llmCalls: (page = 1, page_size = 50, category?: string) =>
+    api.get('/observability/llm-calls', { params: { page, page_size, ...(category ? { category } : {}) } }),
   traces: (messageId: string) => api.get(`/observability/traces/${messageId}`),
+};
+
+// ─── Search ──────────────────────────────────────────────────────────────────
+export const searchApi = {
+  search: (query: string, options?: { top_k?: number; min_score?: number; connector_id?: string }) =>
+    api.post('/search', { query, ...options }),
 };
 
 // ─── Capabilities ────────────────────────────────────────────────────────────
